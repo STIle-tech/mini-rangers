@@ -1,1518 +1,367 @@
-// ---------- หน้าทีม: Drag & Drop ตัวละคร ----------
-class TeamScene extends Phaser.Scene {
+// ---------- หน้าทีม (สไตล์ Line Rangers): ลากตัวละครขึ้นแท่นเพื่อจัดทีม ----------
+// เลย์เอาต์: ด้านบน 3/4 ของจอ = แท่นตัวละคร / ด้านล่าง 1/4 = รายการการ์ด (เลื่อนซ้าย-ขวา)
+const TEAM_SPLIT = 3 / 4;     // สัดส่วนพื้นที่ด้านบน (แท่น) ที่เหลือเป็นของรายการการ์ด
+const TEAM_CARD_W = 182;      // ขนาดออกแบบของการ์ด (กว้าง x สูง) ตอนแสดงจริงจะย่อสเกลอัตโนมัติให้พอดีพื้นที่ 1/4 ล่าง
+const TEAM_CARD_H = 132;      // ถ้ามีรูปการ์ด ให้ทำสัดส่วนเดียวกัน เช่น 728x528
+const TEAM_CARD_GAP = 8;      // ช่องว่างระหว่างการ์ด (ก่อนสเกล)
+const TEAM_GEM = [{ x: -10, y: -4 }, { x: -5, y: -11 }, { x: 5, y: -11 }, { x: 10, y: -4 }, { x: 0, y: 12 }];
+// ภาพ UI หน้าทีม (ถ้าไม่มีไฟล์ จะใช้รูปทรงที่โค้ดวาดแทนอัตโนมัติ) วางไว้ที่ assets/ui/team/
+const TEAM_ASSETS = {
+  team_ped_gold: 'ped_gold.png',       // แท่นเกรด 4-5 (ขอบทอง)
+  team_ped_purple: 'ped_purple.png',   // แท่นเกรด 3 (ขอบม่วงชมพู)
+  team_ped_blue: 'ped_blue.png',       // แท่นเกรด 1-2 (ขอบน้ำเงินเทา)
+  team_ped_empty: 'ped_empty.png',     // แท่นว่าง (ยังไม่มีตัวละคร)
+  team_card_high: 'card_high.png',     // การ์ดเกรด 4-5 (กรมท่าขอบฟ้า)
+  team_card_normal: 'card_normal.png', // การ์ดปกติ (ม่วงขอบทอง)
+};
+const TEAM_PED_W = 140;       // ความกว้างแท่นที่แสดง (px ในเกม) ความสูงปรับตามสัดส่วนภาพ
+const TEAM_PED_ORIGIN_Y = 0.4; // จุดที่ตัวละครยืน อยู่ลงมากี่ส่วนของความสูงภาพแท่น (0=ขอบบน 1=ขอบล่าง) ถ้าเท้าลอย/จมให้ปรับเลขนี้
+const TEAM_PORTRAIT_H = 72;   // ความสูงตัวละครบนแท่น (ก่อนคูณสเกลแท่น) เล็ก/ใหญ่ปรับเลขนี้
+const teamGrade = k => Math.max(1, Math.min(5, (typeof gradeOf === 'function' ? gradeOf(k) : 1) | 0));
+// เรียงรายการ: [ชื่อ, ฟังก์ชันคีย์เรียง] (null = ลำดับเดิม)
+const TEAM_SORTS = [['ล่าสุด', null], ['ระดับ', k => -teamGrade(k)], ['ราคา', k => -UNITS[k].cost], ['ธาตุ', k => UNITS[k].element]];
 
-  constructor() {
-    super('team');
+class TeamScene extends Phaser.Scene {
+  constructor() { super('team'); }
+
+  preload() {
+    if (!this.textures.exists('team_bg')) this.load.image('team_bg', 'assets/backgrounds/team/team_bg.png');   // ไม่มีไฟล์ก็ใช้พื้นหลังสำรอง
+    for (const [key, file] of Object.entries(TEAM_ASSETS)) if (!this.textures.exists(key)) this.load.image(key, 'assets/ui/team/' + file);
+    this.load.on('loaderror', f => (f.key === 'team_bg' || f.key in TEAM_ASSETS) && console.warn('[TEAM] ไม่พบ', f.src));
   }
 
   create() {
+    this.drag = null;                              // { key, from, obj } ระหว่างลากตัวละคร
+    this.scroll = { on: false, moved: false, x0: 0, l0: 0 };
+    this.sortMode = 0;
 
-    // =====================================================
-    // STATE
-    // =====================================================
+    // ---------- คำนวณเลย์เอาต์จากขนาดจอ (3/4 บน : 1/4 ล่าง) ----------
+    this.listTop = Math.round(H * TEAM_SPLIT);               // เส้นแบ่งแท่น / รายการ
+    this.barY = this.listTop - 18;                           // แถบคำอธิบาย + จัดเรียง
+    this.slotX = [0, 1, 2, 3, 4].map(i => Math.round(W * (0.125 + 0.1875 * i)));
+    // สเกลแท่น: ขยายตามความสูงที่เหลือ แต่ไม่ให้แท่นชนกัน (ระยะห่างช่อง = W*0.1875)
+    const areaTop = 82, areaBot = this.barY - 8;
+    this.ps = Math.max(0.7, Math.min(0.95, (areaBot - areaTop) / 165, (W * 0.1875) / TEAM_PED_W * 1.04));
+    this.padY = Math.round((areaTop + areaBot) / 2 + 18 * this.ps);   // ตำแหน่งแท่น (จัดให้อยู่กลางพื้นที่ด้านบน)
+    const availH = H - this.listTop - 24;                    // พื้นที่การ์ด (เว้นที่สกรอลล์บาร์ด้านล่าง)
+    this.cardK = Math.min(1, availH / TEAM_CARD_H);          // สเกลการ์ด
+    this.cardStep = (TEAM_CARD_W + TEAM_CARD_GAP) * this.cardK;
+    this.cardCY = this.listTop + 6 + (TEAM_CARD_H * this.cardK) / 2;
 
-    this.dragMoved = false;
-    this.dragInList = false;
-
-    this.draggingUnit = false;
-    this.dragObject = null;
-    this.dragKey = null;
-    this.dragFromSlot = -1;
-
-    this.dragStartX = 0;
-    this.listStartX = 0;
-
-    // =====================================================
-    // BACKGROUND
-    // =====================================================
-
-    this.add.rectangle(
-      W / 2,
-      H / 2,
-      W,
-      H,
-      0xd9c08a
-    );
-
-    for (let r = 0; r < 6; r++) {
-
-      for (let c = 0; c < 10; c++) {
-
-        this.add.rectangle(
-          c * 90 + (r % 2) * 45,
-          30 + r * 40,
-          86,
-          36,
-          0xe2cb98
-        )
-        .setStrokeStyle(
-          1,
-          0xb99a62,
-          0.6
-        );
+    // พื้นหลัง: ใช้รูป team_bg ถ้ามี (assets/backgrounds/team/team_bg.png) ไม่มีก็ใช้ผนังอิฐทรายสำรอง
+    const hasBg = this.textures.exists('team_bg');
+    if (hasBg) {
+      const bg = this.add.image(W / 2, H / 2, 'team_bg').setDepth(-100);
+      bg.setScale(Math.max(W / bg.width, H / bg.height));
+      this.add.rectangle(W / 2, 0, W, 90, 0x000000, 0.28).setOrigin(0.5, 0);   // เงาจางด้านบนให้ป้ายอ่านง่าย
+    } else {
+      this.add.rectangle(W / 2, H / 2, W, H, 0xe3cb98);
+      for (let r = 0; r < Math.ceil(this.listTop / 36); r++) {
+        for (let c = 0; c < 10; c++) {
+          this.add.rectangle(c * 90 + (r % 2) * 45, 14 + r * 36, 86, 32, 0xead6a8).setStrokeStyle(1, 0xc7a96d, 0.7);
+        }
       }
+      this.add.ellipse(W / 2, this.padY + 18 * this.ps, 760, 120 * this.ps, 0xf1e2bc, 0.55);   // พื้นหินวงกลมใต้แท่น
     }
+    // พื้นรายการตัวละคร: ไม้เข้ม (โปร่งเล็กน้อยเมื่อมีรูปพื้นหลัง) + ขอบทองด้านบน
+    this.add.rectangle(W / 2, (this.listTop + H) / 2, W, H - this.listTop, 0x3a2514, hasBg ? 0.88 : 1);
+    this.add.rectangle(W / 2, this.listTop, W, 3, 0xf0b429, 0.9);
 
-    this.add.rectangle(
-      W / 2,
-      352,
-      W,
-      196,
-      0x4a3320
-    );
+    // แถบบน: ปุ่มกลับ ชื่อหน้า ปุ่มช่วยเหลือ เพชร/ทอง
+    this.click(this.add.circle(30, 28, 19, 0xffd23f).setStrokeStyle(3, 0x1a1a1a), () => this.scene.start('lobby'));
+    this.t(30, 28, '◀', 18, '#1a1a1a');
+    this.t(58, 28, 'ทีม', 34, '#4cc2ff', { stroke: '#0b3d91', strokeThickness: 7 }).setOrigin(0, 0.5);
+    this.click(this.add.circle(135, 28, 13, 0xffd23f).setStrokeStyle(2, 0x1a1a1a), () => this.toast('ลากรูปตัวละครขึ้นแท่นเพื่อจัดทีม'));
+    this.t(135, 28, '?', 17, '#1a1a1a');
+    this.pill(W - 250, 'gem', SAVE.gems || 0);
+    this.pill(W - 115, 'gold', Math.floor(SAVE.gold || 0));
 
-    // =====================================================
-    // HEADER
-    // =====================================================
+    // แถบสรุปทีม
+    this.add.graphics().fillStyle(0x4a2c12).fillRoundedRect(20, 47, 372, 26, 9).fillStyle(0x8a5028).fillRoundedRect(22, 49, 368, 22, 8);
+    this.infoText = this.t(34, 60, '', 15, '#fff', { stroke: '#3a1f0c', strokeThickness: 3 }).setOrigin(0, 0.5);
 
-    const back =
-      this.add.circle(
-        32,
-        30,
-        20,
-        0xffd23f
-      )
-      .setStrokeStyle(
-        3,
-        0x8a5a10
-      )
-      .setInteractive({
-        useHandCursor: true
-      });
+    this.slotLayer = this.add.container(0, 0);
+    this.slotGlow = this.add.ellipse(0, this.padY, 134 * this.ps, 40 * this.ps).setStrokeStyle(4, 0xffd23f).setVisible(false).setDepth(1500);
 
-    this.add.text(
-      32,
-      30,
-      '◀',
-      {
-        fontFamily: FONT,
-        fontSize: '20px',
-        color: '#5a3a08',
-        fontStyle: 'bold'
-      }
-    )
-    .setOrigin(0.5);
+    // แถบกลาง: คำอธิบาย + จัดเรียง + ฟิลเตอร์
+    this.add.rectangle(W / 2, this.barY, W, 30, 0x6b4a2a).setStrokeStyle(2, 0x3a2410);
+    this.t(12, this.barY, 'ลากรูปเพื่อจัดทีม · ลากบนแท่นเพื่อสลับ · ลากลงล่างเพื่อเอาออก', 12, '#ffe0a3', { fontStyle: 'normal' }).setOrigin(0, 0.5);
+    this.woodBtn(W - 160, this.barY, 132, () => this.setSort((this.sortMode + 1) % TEAM_SORTS.length));
+    this.sortText = this.t(W - 160, this.barY, '', 12);
+    this.woodBtn(W - 52, this.barY, 84, () => this.toast('ฟิลเตอร์ยังไม่เปิดให้ใช้งาน'));
+    this.t(W - 52, this.barY, 'ฟิลเตอร์', 12);
 
-    back.on(
-      'pointerdown',
-      () => {
-        this.scene.start('lobby');
-      }
-    );
+    this.listLayer = this.add.container(0, 0);
+    this.track = this.add.rectangle(W / 2, H - 10, W - 24, 5, 0x000000, 0.35);
+    this.thumb = this.add.rectangle(12, H - 10, 60, 5, 0xe0c080).setOrigin(0, 0.5);
+    this.toastText = this.t(W / 2, 100, '', 17, '#fff', { backgroundColor: '#000000cc', padding: { x: 12, y: 6 } }).setAlpha(0).setDepth(1000);
+    this.minX = Math.min(0, W - (12 + UNIT_KEYS.length * this.cardStep + 4));   // ขอบซ้ายสุดที่เลื่อนรายการได้
 
-    this.add.text(
-      64,
-      30,
-      'ทีม',
-      {
-        fontFamily: FONT,
-        fontSize: '34px',
-        color: '#ffd23f',
-        fontStyle: 'bold',
-        stroke: '#5a3a08',
-        strokeThickness: 6
-      }
-    )
-    .setOrigin(
-      0,
-      0.5
-    );
+    const inp = this.input;
+    inp.on('pointerdown', this.onDown, this);
+    inp.on('pointermove', this.onMove, this);
+    inp.on('pointerup', p => this.onUp(p), this);
+    inp.on('pointerupoutside', p => this.onUp(p, true), this);   // ปล่อยนอกจอ = ยกเลิกการลาก
+    inp.on('wheel', (p, over, dx, dy) => this.scrollList(this.listLayer.x - (dx || dy)));
 
-    this.countText =
-      this.add.text(
-        134,
-        32,
-        '',
-        {
-          fontFamily: FONT,
-          fontSize: '20px',
-          color: '#fff',
-          stroke: '#5a3a08',
-          strokeThickness: 4
-        }
-      )
-      .setOrigin(
-        0,
-        0.5
-      );
+    this.setSort(0);
+  }
 
-    // =====================================================
-    // GOLD
-    // =====================================================
+  // ---------- ตัวช่วย ----------
+  t(x, y, s, size, color = '#fff', style = {}) {
+    return this.add.text(x, y, s, { fontFamily: FONT, fontSize: size + 'px', color, fontStyle: 'bold', ...style }).setOrigin(0.5);
+  }
 
-    this.add.rectangle(
-      690,
-      26,
-      150,
-      26,
-      0x101a30,
-      0.92
-    )
-    .setStrokeStyle(
-      2,
-      0x3a4a70
-    );
+  click(obj, fn) { return obj.setInteractive({ useHandCursor: true }).on('pointerdown', fn); }
 
-    this.add.circle(
-      622,
-      26,
-      13,
-      0xffb300
-    )
-    .setStrokeStyle(
-      2,
-      0xffffff,
-      0.7
-    );
+  // คริสตัล/เพชร (graphics วาดที่ x,y ขนาด s)
+  gem(x, y, s = 1, color = 0x38c4ff, dark = 0x1a86e0) {
+    return this.add.graphics({ x, y }).setScale(s)
+      .fillStyle(color).fillPoints(TEAM_GEM, true)
+      .fillStyle(dark).fillPoints([TEAM_GEM[0], TEAM_GEM[3], TEAM_GEM[4]], true)
+      .lineStyle(2, 0xffffff, 0.95).strokePoints(TEAM_GEM, true);
+  }
 
-    this.add.text(
-      622,
-      26,
-      '$',
-      {
-        fontFamily: FONT,
-        fontSize: '14px',
-        color: '#fff',
-        fontStyle: 'bold'
-      }
-    )
-    .setOrigin(0.5);
+  // ป้ายสกุลเงินขวาบน (ไอคอนเป็น GIF เหมือนลอบบี้) + ปุ่ม +
+  pill(cx, type, value) {
+    const y = 22, w = 124, left = cx - w / 2, right = cx + w / 2;
+    this.add.graphics().fillStyle(0x101a30, 0.92).fillRoundedRect(left, y - 14, w, 28, 14).lineStyle(2, 0x3a4a70).strokeRoundedRect(left, y - 14, w, 28, 14);
+    addCurrencyGif(this, type, left + 17, y);
+    // ตัวเลขชิดซ้ายถัดจากไอคอน (ไม่ทับ) และย่อขนาดอัตโนมัติถ้ายาวเกินช่องก่อนปุ่ม +
+    const num = this.t(left + 35, y, Number(value).toLocaleString('en-US'), 15, type === 'gold' ? '#ffe066' : '#fff').setOrigin(0, 0.5);
+    for (let s = 15; num.width > right - 28 - (left + 35) && s > 8;) num.setFontSize(--s);
+    this.click(this.add.circle(right - 14, y, 11, 0x4ab34a), () => this.toast('ยังไม่เปิดให้ใช้งาน'));
+    this.t(right - 14, y - 1, '+', 16);
+  }
 
-    this.add.text(
-      698,
-      26,
-      Math.floor(
-        SAVE.gold
-      ).toLocaleString('en-US'),
-      {
-        fontFamily: FONT,
-        fontSize: '16px',
-        color: '#fff',
-        fontStyle: 'bold'
-      }
-    )
-    .setOrigin(0.5);
+  woodBtn(x, y, w, fn) {
+    this.add.graphics().fillStyle(0x3a2410).fillRoundedRect(x - w / 2, y - 12, w, 24, 8).fillStyle(0x8a5028).fillRoundedRect(x - w / 2 + 2, y - 10, w - 4, 20, 7);
+    return this.click(this.add.rectangle(x, y, w, 24, 0xffffff, 0.001), fn);
+  }
 
-    // =====================================================
-    // SLOT POSITIONS
-    // =====================================================
-
-    this.slotX = [
-      100,
-      250,
-      400,
-      550,
-      700
-    ];
-
-    // =====================================================
-    // SLOT BASE
-    // =====================================================
-
-    this.slotX.forEach(
-      x => {
-
-        this.add.ellipse(
-          x,
-          178,
-          118,
-          30,
-          0x8c7a58
-        );
-
-        this.add.rectangle(
-          x,
-          164,
-          118,
-          28,
-          0xa8956c
-        );
-
-        this.add.ellipse(
-          x,
-          150,
-          118,
-          30,
-          0xe0d2ae
-        )
-        .setStrokeStyle(
-          3,
-          0x8c7a58
-        );
-      }
-    );
-
-    // =====================================================
-    // HELP BAR
-    // =====================================================
-
-    this.add.rectangle(
-      W / 2,
-      236,
-      W,
-      36,
-      0x6b4a2a
-    )
-    .setStrokeStyle(
-      2,
-      0x3a2410
-    );
-
-    this.add.text(
-      14,
-      236,
-      'ลากที่รูปตัวละครเพื่อจัดทีม · ลากรูปบนแท่นเพื่อเปลี่ยนตำแหน่ง',
-      {
-        fontFamily: FONT,
-        fontSize: '13px',
-        color: '#ffe0a3'
-      }
-    )
-    .setOrigin(
-      0,
-      0.5
-    );
-
-    // =====================================================
-    // FILTER
-    // =====================================================
-
-    [
-      'ระดับ ▾',
-      'ราคา ▾',
-      'ธาตุ ▾',
-      'ล่าสุด ▾'
-    ]
-    .forEach(
-      (label, i) => {
-
-        const x =
-          522 + i * 82;
-
-        const b =
-          this.add.rectangle(
-            x,
-            236,
-            76,
-            26,
-            0x2f6fb0
-          )
-          .setStrokeStyle(
-            2,
-            0xffffff,
-            0.85
-          )
-          .setInteractive({
-            useHandCursor: true
-          });
-
-        this.add.text(
-          x,
-          236,
-          label,
-          {
-            fontFamily: FONT,
-            fontSize: '13px',
-            color: '#fff',
-            fontStyle: 'bold'
-          }
-        )
-        .setOrigin(0.5);
-
-        b.on(
-          'pointerdown',
-          () => {
-
-            this.toast(
-              'ตัวกรองยังไม่เปิดให้ใช้งาน'
-            );
-          }
-        );
-      }
-    );
-
-    // =====================================================
-    // LAYERS
-    // =====================================================
-
-    this.slotLayer =
-      this.add.container(
-        0,
-        0
-      );
-
-    this.listLayer =
-      this.add.container(
-        0,
-        0
-      );
-
-    // =====================================================
-    // TOAST
-    // =====================================================
-
-    this.toastText =
-      this.add.text(
-        W / 2,
-        62,
-        '',
-        {
-          fontFamily: FONT,
-          fontSize: '17px',
-          color: '#fff',
-          backgroundColor: '#000000cc',
-          padding: {
-            x: 12,
-            y: 6
-          }
-        }
-      )
-      .setOrigin(0.5)
-      .setAlpha(0)
-      .setDepth(1000);
-
-    // =====================================================
-    // HORIZONTAL LIST SCROLL
-    // =====================================================
-
-    this.minX =
-      Math.min(
-        0,
-        W -
-        (
-          20 +
-          UNIT_KEYS.length * 160
-        )
-      );
-
-    this.input.on(
-      'pointerdown',
-      this.handlePointerDown,
-      this
-    );
-
-    this.input.on(
-      'pointermove',
-      this.handlePointerMove,
-      this
-    );
-
-    this.input.on(
-      'pointerup',
-      this.handlePointerUp,
-      this
-    );
-
-    // =====================================================
-    // BUILD
-    // =====================================================
-
+  setSort(i) {
+    this.sortMode = i;
+    this.sortText.setText(`จัดเรียง: ${TEAM_SORTS[i][0]} ▾`);
     this.refresh();
   }
 
-  // =====================================================
-  // GLOBAL POINTER DOWN
-  // ใช้เฉพาะเลื่อนรายการซ้าย-ขวา
-  // =====================================================
-
-  handlePointerDown(pointer) {
-
-    if (
-      this.draggingUnit
-    ) {
-      return;
-    }
-
-    if (
-      pointer.y >= 258 &&
-      pointer.y <= H
-    ) {
-
-      this.dragStartX =
-        pointer.x;
-
-      this.listStartX =
-        this.listLayer.x;
-
-      this.dragMoved = false;
-
-      this.dragInList = true;
-    }
+  sortedKeys() {
+    const f = TEAM_SORTS[this.sortMode][1];
+    return f ? UNIT_KEYS.slice().sort((a, b) => (f(a) > f(b)) - (f(a) < f(b))) : UNIT_KEYS.slice();
   }
 
-  // =====================================================
-  // GLOBAL POINTER MOVE
-  // =====================================================
-
-  handlePointerMove(pointer) {
-
-    // -----------------------------------------------------
-    // ถ้ากำลังลากตัวละคร
-    // -----------------------------------------------------
-
-    if (
-      this.draggingUnit
-    ) {
-
-      if (
-        this.dragObject
-      ) {
-
-        this.dragObject.x =
-          pointer.x;
-
-        this.dragObject.y =
-          pointer.y;
-      }
-
-      return;
+  // ภาพตัวละคร (สไปรต์เฟรมแรก หรือสี่เหลี่ยมถ้าไม่มีรูป) วางเท้าที่ feetY
+  makePortrait(x, feetY, key, targetH) {
+    const def = UNITS[key];
+    if (def.sprite && this.textures.exists('unit_' + key)) {
+      return this.add.sprite(x, feetY, 'unit_' + key, def.sprite.walk[0]).setOrigin(0.5, 122 / 128).setScale(targetH / def.sprite.frameHeight);
     }
-
-    // -----------------------------------------------------
-    // เลื่อนรายการซ้าย-ขวา
-    // -----------------------------------------------------
-
-    if (
-      !pointer.isDown ||
-      !this.dragInList ||
-      this.minX >= 0
-    ) {
-      return;
-    }
-
-    const dx =
-      pointer.x -
-      this.dragStartX;
-
-    if (
-      Math.abs(dx) > 8
-    ) {
-
-      this.dragMoved = true;
-    }
-
-    if (
-      this.dragMoved
-    ) {
-
-      this.listLayer.x =
-        Phaser.Math.Clamp(
-          this.listStartX + dx,
-          this.minX,
-          0
-        );
-    }
+    const f = targetH / 48, h = def.size * 1.6 * f;
+    return this.add.rectangle(x, feetY - h / 2, def.size * f, h, def.color).setStrokeStyle(2, 0x0b3d91);
   }
 
-  // =====================================================
-  // GLOBAL POINTER UP
-  // =====================================================
-
-  handlePointerUp(pointer) {
-
-    if (
-      this.draggingUnit
-    ) {
-
-      this.finishUnitDrag(
-        pointer
-      );
-
-      return;
-    }
-
-    this.dragInList = false;
+  // รูปที่กดลากได้ (from = ช่องในทีม หรือ -1 ถ้ามาจากรายการ)
+  draggable(portrait, key) {
+    return this.click(portrait, p => {
+      p.event?.stopPropagation();
+      this.startDrag(p, key, SAVE.team.indexOf(key), portrait);
+    });
   }
 
-  // =====================================================
-  // REFRESH
-  // =====================================================
-
+  // ---------- สร้างหน้าจอ ----------
   refresh() {
-
-    this.countText.setText(
-      `${SAVE.team.length}/${TEAM_SIZE}`
-    );
-
+    const team = SAVE.team;
+    this.infoText.setText(`ทีม : ${team.length}/${TEAM_SIZE}   ·   พลังงานรวม ${team.reduce((s, k) => s + UNITS[k].cost, 0)}`);
     this.buildSlots();
-
     this.buildCards();
   }
 
-  // =====================================================
-  // STAR
-  // =====================================================
-
-  starText(lv) {
-
-    const n =
-      Math.min(
-        5,
-        Math.ceil(lv / 2)
-      );
-
-    return (
-      '★'.repeat(n) +
-      '☆'.repeat(5 - n)
-    );
-  }
-
-  // =====================================================
-  // DIAMOND
-  // =====================================================
-
-  diamond(x, y) {
-
-    return this.add.polygon(
-      x,
-      y,
-      [
-        0, 9,
-        9, 0,
-        18, 9,
-        9, 18
-      ],
-      0x3aa7ff
-    )
-    .setStrokeStyle(
-      2,
-      0xffffff,
-      0.9
-    );
-  }
-
-  // =====================================================
-  // PORTRAIT
-  // =====================================================
-
-  makePortrait(
-    x,
-    feetY,
-    key,
-    targetH
-  ) {
-
-    const def =
-      UNITS[key];
-
-    if (
-      def.sprite &&
-      this.textures.exists(
-        'unit_' + key
-      )
-    ) {
-
-      return this.add.sprite(
-        x,
-        feetY,
-        'unit_' + key,
-        def.sprite.walk[0]
-      )
-      .setOrigin(
-        0.5,
-        122 / 128
-      )
-      .setScale(
-        targetH /
-        def.sprite.frameHeight
-      );
+  // แท่นยืน: รูปทรงกระบอก ขอบสีตามเกรด แถบดำมีดาเกรด
+  pedestal(x, rim, top, band, tex) {
+    const y = this.padY, k = this.ps;
+    if (this.textures.exists(tex)) {
+      const img = this.add.image(x, y, tex).setOrigin(0.5, TEAM_PED_ORIGIN_Y);
+      return img.setScale(TEAM_PED_W * k / img.width);
     }
-
-    const f =
-      targetH / 48;
-
-    const w =
-      def.size * f;
-
-    const h =
-      def.size *
-      1.6 *
-      f;
-
-    return this.add.rectangle(
-      x,
-      feetY - h / 2,
-      w,
-      h,
-      def.color
-    )
-    .setStrokeStyle(
-      2,
-      0x0b3d91
-    );
+    return this.add.graphics()
+      .fillStyle(0x000000, 0.22).fillEllipse(x, y + 32 * k, 136 * k, 26 * k)
+      .fillStyle(band).fillRect(x - 60 * k, y, 120 * k, 24 * k).fillEllipse(x, y + 24 * k, 120 * k, 30 * k)
+      .fillStyle(rim).fillEllipse(x, y, 124 * k, 36 * k)
+      .fillStyle(top).fillEllipse(x, y - k, 106 * k, 27 * k);
   }
-
-  // =====================================================
-  // BUILD SLOTS
-  // =====================================================
 
   buildSlots() {
-
-    this.slotLayer.removeAll(
-      true
-    );
-
-    for (
-      let i = 0;
-      i < TEAM_SIZE;
-      i++
-    ) {
-
-      const x =
-        this.slotX[i];
-
-      const key =
-        SAVE.team[i];
-
-      // ---------------------------------------------------
-      // ช่องแท่น
-      // ---------------------------------------------------
-
-      const hit =
-        this.add.rectangle(
-          x,
-          120,
-          118,
-          130,
-          0xffffff,
-          0.001
-        );
-
-      // ช่องแท่นไม่ต้อง interactive
-      // ถ้ามีตัวละคร เพราะเราจะลากจาก "รูป" เท่านั้น
-
-      if (key) {
-
-        const def =
-          UNITS[key];
-
-        // -------------------------------------------------
-        // รูปตัวละคร
-        // -------------------------------------------------
-
-        const portrait =
-          this.makePortrait(
-            x,
-            146,
-            key,
-            80
-          );
-
-        portrait.setInteractive({
-          useHandCursor: true
-        });
-
-        portrait.on(
-          'pointerdown',
-          pointer => {
-
-            if (
-              pointer.event
-            ) {
-              pointer.event.stopPropagation();
-            }
-
-            this.startUnitDrag(
-              pointer,
-              key,
-              i
-            );
-          }
-        );
-
-        // -------------------------------------------------
-        // ดาว
-        // -------------------------------------------------
-
-        const stars =
-          this.add.text(
-            x,
-            164,
-            this.starText(
-              SAVE.levels[key]
-            ),
-            {
-              fontFamily: FONT,
-              fontSize: '13px',
-              color: '#ffd23f',
-              stroke: '#5a3a08',
-              strokeThickness: 3
-            }
-          )
-          .setOrigin(0.5);
-
-        // -------------------------------------------------
-        // COST
-        // -------------------------------------------------
-
-        const dia =
-          this.diamond(
-            x - 22,
-            202
-          );
-
-        const cost =
-          this.add.text(
-            x - 8,
-            202,
-            String(def.cost),
-            {
-              fontFamily: FONT,
-              fontSize: '20px',
-              color: '#3a2410',
-              fontStyle: 'bold'
-            }
-          )
-          .setOrigin(
-            0,
-            0.5
-          );
-
-        // -------------------------------------------------
-        // ELEMENT / TYPE
-        // -------------------------------------------------
-
-        const tagS =
-          this.add.text(
-            x + 40,
-            104,
-            ELEMENTS[def.element].icon +
-            TYPES[def.type].icon,
-            {
-              fontFamily: FONT,
-              fontSize: '16px'
-            }
-          )
-          .setOrigin(0.5);
-
+    this.slotLayer.removeAll(true);
+    const y = this.padY, k = this.ps;
+    this.slotX.forEach((x, i) => {
+      const key = SAVE.team[i];
+      if (!key) {
         this.slotLayer.add([
-          hit,
-          portrait,
-          stars,
-          dia,
-          cost,
-          tagS
+          this.pedestal(x, 0xb9c0cc, 0xdfe4ea, 0x6c7685, 'team_ped_empty'),
+          this.t(x, y - 34 * k, '+', Math.round(44 * k), '#aab3c2'),
+          this.t(x, y + 52 * k, 'ลากมาวางที่นี่', Math.round(13 * k), '#8c7a58', { fontStyle: 'normal' }),
         ]);
-
-      } else {
-
-        // -------------------------------------------------
-        // EMPTY SLOT
-        // -------------------------------------------------
-
-        const plus =
-          this.add.text(
-            x,
-            112,
-            '+',
-            {
-              fontFamily: FONT,
-              fontSize: '48px',
-              color: '#b99a62',
-              fontStyle: 'bold'
-            }
-          )
-          .setOrigin(0.5);
-
-        const empty =
-          this.add.text(
-            x,
-            202,
-            'ลากมาวางที่นี่',
-            {
-              fontFamily: FONT,
-              fontSize: '14px',
-              color: '#8c7a58'
-            }
-          )
-          .setOrigin(0.5);
-
-        this.slotLayer.add([
-          hit,
-          plus,
-          empty
-        ]);
+        return;
       }
-    }
+      const def = UNITS[key], g = teamGrade(key);
+      const rim = g >= 4 ? 0xf0b429 : g === 3 ? 0xd24fb8 : 0x5b8bd6;
+      this.slotLayer.add([
+        this.pedestal(x, rim, 0xefe3c4, 0x1b1b24, g >= 4 ? 'team_ped_gold' : g === 3 ? 'team_ped_purple' : 'team_ped_blue'),
+        this.draggable(this.makePortrait(x, y - 2 * k, key, TEAM_PORTRAIT_H * k), key),
+        this.add.circle(x - 52 * k, y - 12 * k, 11 * k, ELEMENTS[def.element].color || 0x888888).setStrokeStyle(2, 0xffffff),
+        this.t(x - 52 * k, y - 12 * k, ELEMENTS[def.element].icon, Math.round(12 * k), '#fff', { fontStyle: 'normal' }),
+        this.t(x, y + 15 * k, '★'.repeat(g), Math.round(14 * k), '#ffd23f', { stroke: '#3a2410', strokeThickness: 3 }),
+        this.gem(x - 26 * k, y + 52 * k, 0.8 * k),
+        this.t(x - 12 * k, y + 52 * k, String(def.cost), Math.round(19 * k), '#fff', { stroke: '#3a2410', strokeThickness: 4 }).setOrigin(0, 0.5),
+      ]);
+    });
   }
 
-  // =====================================================
-  // BUILD CARDS
-  // =====================================================
+  // เส้นประแนวนอน (เส้นคั่นในการ์ด)
+  dashes(g, x0, x1, y) {
+    for (let x = x0; x < x1; x += 5) g.lineBetween(x, y, Math.min(x + 3, x1), y);
+  }
 
+  // การ์ดตัวละคร: วาดที่ขนาดออกแบบ 182x132 ใน container แล้วย่อสเกลให้พอดีพื้นที่ 1/3 ล่าง
+  // ซ้าย = รูปตัวละครในกรอบเข้ม / ขวา = ชื่อ, เลเวล, ราคา (เส้นประคั่น) / ดาเกรดอยู่กลางขอบบน
   buildCards() {
+    this.listLayer.removeAll(true);
+    const w = TEAM_CARD_W, h = TEAM_CARD_H;
+    this.sortedKeys().forEach((key, n) => {
+      const def = UNITS[key], lv = SAVE.levels[key] || 1, g = teamGrade(key), inTeam = SAVE.team.includes(key);
+      const hi = g >= 4;   // เกรดสูง = การ์ดกรมท่าขอบฟ้า / ปกติ = ม่วงขอบทอง
+      const [fill, border, inset, star, nameCol] = hi ? [0x1c2547, 0x2fd0c0, 0x10173a, '#5fe8e0', '#d7def5'] : [0x6a2fa8, 0xf0b429, 0x4a1f7e, '#ffd23f', '#ffffff'];
+      // พิกัดภายใน container: จุดกึ่งกลางการ์ด = (0,0)
+      const cx = 0, cy = 0, L = -w / 2, T = -h / 2, R = w / 2;
+      const colL = L + 90, colM = (colL + R - 8) / 2;   // คอลัมน์ขวา: ชื่อ/เลเวล/ราคา
+      const info = this.add.circle(R - 15, T + 17, 10, hi ? 0x3a4a90 : 0x4a1f7e).setStrokeStyle(2, 0xffffff, 0.85);
+      this.click(info, p => {
+        p.event?.stopPropagation();
+        this.scene.start('character', { sel: UNIT_KEYS.indexOf(key), from: 'team' });
+      });
 
-    this.listLayer.removeAll(
-      true
-    );
-
-    const top = 264;
-
-    UNIT_KEYS.forEach(
-      (key, i) => {
-
-        const def =
-          UNITS[key];
-
-        const lv =
-          SAVE.levels[key];
-
-        const inTeam =
-          SAVE.team.includes(key);
-
-        const cx =
-          95 + i * 160;
-
-        // -------------------------------------------------
-        // CARD
-        // ไม่มีกรอบเขียว
-        // -------------------------------------------------
-
-        const bg =
-          this.add.rectangle(
-            cx,
-            top + 82,
-            150,
-            164,
-            0xffd23f
-          )
-          .setStrokeStyle(
-            4,
-            0xb88a00
-          );
-
-        const inner =
-          this.add.rectangle(
-            cx,
-            top + 82,
-            138,
-            152,
-            0xfff0a8
-          );
-
-        // -------------------------------------------------
-        // STAR
-        // -------------------------------------------------
-
-        const stars =
-          this.add.text(
-            cx,
-            top + 16,
-            this.starText(lv),
-            {
-              fontFamily: FONT,
-              fontSize: '17px',
-              color: '#e39b00'
-            }
-          )
-          .setOrigin(0.5);
-
-        // -------------------------------------------------
-        // PORTRAIT
-        // -------------------------------------------------
-
-        const portrait =
-          this.makePortrait(
-            cx - 38,
-            top + 112,
-            key,
-            66
-          );
-
-        // =================================================
-        // สำคัญ:
-        // ลากได้ "เฉพาะรูปตัวละคร"
-        // =================================================
-
-        portrait.setInteractive({
-          useHandCursor: true
-        });
-
-        portrait.on(
-          'pointerdown',
-          pointer => {
-
-            if (
-              pointer.event
-            ) {
-              pointer.event.stopPropagation();
-            }
-
-            this.startUnitDrag(
-              pointer,
-              key,
-              SAVE.team.indexOf(key)
-            );
-          }
-        );
-
-        // -------------------------------------------------
-        // NAME
-        // -------------------------------------------------
-
-        const name =
-          this.add.text(
-            cx + 30,
-            top + 54,
-            def.name,
-            {
-              fontFamily: FONT,
-              fontSize: '18px',
-              color: '#3a2410',
-              fontStyle: 'bold'
-            }
-          )
-          .setOrigin(0.5);
-
-        // -------------------------------------------------
-        // LEVEL
-        // -------------------------------------------------
-
-        const lvText =
-          this.add.text(
-            cx + 30,
-            top + 78,
-            `LV ${lv}/${MAX_LEVEL}`,
-            {
-              fontFamily: FONT,
-              fontSize: '14px',
-              color: '#5a3a08',
-              fontStyle: 'bold'
-            }
-          )
-          .setOrigin(0.5);
-
-        // -------------------------------------------------
-        // COST
-        // -------------------------------------------------
-
-        const dia =
-          this.diamond(
-            cx + 14,
-            top + 103
-          );
-
-        const cost =
-          this.add.text(
-            cx + 28,
-            top + 103,
-            String(def.cost),
-            {
-              fontFamily: FONT,
-              fontSize: '18px',
-              color: '#3a2410',
-              fontStyle: 'bold'
-            }
-          )
-          .setOrigin(
-            0,
-            0.5
-          );
-
-        // -------------------------------------------------
-        // STATUS
-        // -------------------------------------------------
-
-        const strip =
-          this.add.rectangle(
-            cx,
-            top + 148,
-            138,
-            24,
-            inTeam
-              ? 0x8c7a58
-              : 0xc9a24a
-          );
-
-        const stripText =
-          this.add.text(
-            cx,
-            top + 148,
-            inTeam
-              ? 'อยู่ในทีม'
-              : 'ลากรูปเพื่อเลือก',
-            {
-              fontFamily: FONT,
-              fontSize: '13px',
-              color: '#fff',
-              fontStyle: 'bold'
-            }
-          )
-          .setOrigin(0.5);
-
-        // -------------------------------------------------
-        // INFO BUTTON
-        // -------------------------------------------------
-
-        const infoBg =
-          this.add.circle(
-            cx + 60,
-            top + 15,
-            11,
-            0x7a4a24
-          )
-          .setStrokeStyle(
-            2,
-            0xffffff,
-            0.9
-          )
-          .setInteractive({
-            useHandCursor: true
-          });
-
-        const infoText =
-          this.add.text(
-            cx + 60,
-            top + 15,
-            'i',
-            {
-              fontFamily: FONT,
-              fontSize: '14px',
-              color: '#fff',
-              fontStyle: 'bold'
-            }
-          )
-          .setOrigin(0.5);
-
-        infoBg.on(
-          'pointerdown',
-          pointer => {
-
-            if (
-              pointer.event
-            ) {
-              pointer.event.stopPropagation();
-            }
-
-            this.scene.start(
-              'character',
-              {
-                sel: i,
-                from: 'team'
-              }
-            );
-          }
-        );
-
-        // -------------------------------------------------
-        // ELEMENT / TYPE
-        // -------------------------------------------------
-
-        const tag =
-          this.add.text(
-            cx + 30,
-            top + 124,
-            `${ELEMENTS[def.element].icon} ${TYPES[def.type].icon} ${TYPES[def.type].name}`,
-            {
-              fontFamily: FONT,
-              fontSize: '12px',
-              color: '#5a3a08',
-              fontStyle: 'bold'
-            }
-          )
-          .setOrigin(0.5);
-
-        // -------------------------------------------------
-        // ADD TO LIST
-        // -------------------------------------------------
-
-        this.listLayer.add([
-          bg,
-          inner,
-          stars,
-          portrait,
-          name,
-          lvText,
-          dia,
-          cost,
-          tag,
-          strip,
-          stripText,
-          infoBg,
-          infoText
-        ]);
+      const tex = hi ? 'team_card_high' : 'team_card_normal';
+      const card = this.textures.exists(tex) ? this.add.image(cx, cy, tex).setDisplaySize(w, h) : this.add.graphics()
+        .fillStyle(0x000000, 0.3).fillRoundedRect(L, T + 4, w, h, 12)
+        .fillStyle(border).fillRoundedRect(L, T, w, h, 12)
+        .fillStyle(fill).fillRoundedRect(L + 3, T + 3, w - 6, h - 6, 10)
+        .fillStyle(0xffffff, 0.1).fillRoundedRect(L + 3, T + 3, w - 6, 34, { tl: 10, tr: 10, bl: 0, br: 0 })
+        .fillStyle(inset).fillRoundedRect(L + 8, T + 24, 74, h - 32, 8)
+        .lineStyle(1, 0xffffff, 0.35);
+      const lines = this.add.graphics().lineStyle(1, 0xffffff, 0.4);
+      this.dashes(lines, colL, R - 10, T + 62);
+      this.dashes(lines, colL, R - 10, T + 90);
+      const items = [
+        card, lines,
+        this.add.graphics().fillStyle(border).fillRoundedRect(cx - 34, T - 2, 68, 20, 8).fillStyle(0x140c24, 0.92).fillRoundedRect(cx - 32, T, 64, 17, 7),   // ป้ายดาเกรดบนขอบการ์ด
+        this.t(cx, T + 9, '★'.repeat(g), 13, star, { stroke: '#1a1030', strokeThickness: 2 }),
+        info,
+        this.t(R - 15, T + 16, 'i', 13),
+        this.draggable(this.makePortrait(L + 45, T + h - 28, key, 66), key),   // ลากได้เฉพาะรูปตัวละคร
+        this.add.circle(L + 20, T + 38, 9, ELEMENTS[def.element].color || 0x888888).setStrokeStyle(2, 0xffffff),
+        this.t(L + 20, T + 38, ELEMENTS[def.element].icon, 10, '#fff', { fontStyle: 'normal' }),
+        this.t(L + 70, T + 38, TYPES[def.type].icon, 11, '#fff', { fontStyle: 'normal' }),
+        this.t(colM - 4, T + 45, def.name, 15, nameCol),
+        this.t(colM - 4, T + 76, `Lv. ${lv}/${MAX_LEVEL}`, 13, '#c9d0ee'),
+        this.gem(colL + 8, T + 108, 0.8),
+        this.t(R - 12, T + 108, String(def.cost), 18, '#fff', { stroke: '#1a1030', strokeThickness: 4 }).setOrigin(1, 0.5),
+      ];
+      if (inTeam) {
+        items.push(this.add.graphics().fillStyle(0x38b04a).fillRoundedRect(L + 17, T + h - 24, 56, 14, 6), this.t(L + 45, T + h - 17, 'ในทีม', 10));
       }
-    );
+      const cardC = this.add.container(12 + (w * this.cardK) / 2 + n * this.cardStep, this.cardCY, items).setScale(this.cardK);
+      this.listLayer.add(cardC);
+    });
+    this.scrollList(this.listLayer.x);
   }
 
-  // =====================================================
-  // START DRAG
-  // =====================================================
-
-  startUnitDrag(
-    pointer,
-    key,
-    fromSlot
-  ) {
-
-    if (
-      !key ||
-      this.draggingUnit
-    ) {
-      return;
+  // ---------- เลื่อนรายการ ----------
+  scrollList(x) {
+    this.listLayer.x = Phaser.Math.Clamp(x, this.minX, 0);
+    const scrollable = this.minX < 0;
+    this.track.setVisible(scrollable);
+    this.thumb.setVisible(scrollable);
+    if (scrollable) {
+      const total = -this.minX + W, w = (W - 24) * W / total;
+      this.thumb.setSize(w, 5).setX(12 + (W - 24 - w) * (-this.listLayer.x / -this.minX));
     }
-
-    this.draggingUnit = true;
-
-    this.dragKey = key;
-
-    this.dragFromSlot =
-      fromSlot;
-
-    // -----------------------------------------------------
-    // ถ้าลากจากแท่น
-    // เอาออกจาก SAVE ชั่วคราว
-    // -----------------------------------------------------
-
-    if (
-      fromSlot >= 0
-    ) {
-
-      SAVE.team.splice(
-        fromSlot,
-        1
-      );
-    }
-
-    // -----------------------------------------------------
-    // สร้างรูปที่กำลังลาก
-    // -----------------------------------------------------
-
-    const def =
-      UNITS[key];
-
-    if (
-      def.sprite &&
-      this.textures.exists(
-        'unit_' + key
-      )
-    ) {
-
-      this.dragObject =
-        this.add.sprite(
-          pointer.x,
-          pointer.y,
-          'unit_' + key,
-          def.sprite.walk[0]
-        )
-        .setOrigin(
-          0.5,
-          122 / 128
-        )
-        .setScale(
-          0.85
-        );
-
-    } else {
-
-      const h = 65;
-
-      this.dragObject =
-        this.add.rectangle(
-          pointer.x,
-          pointer.y - h / 2,
-          45,
-          h,
-          def.color
-        )
-        .setStrokeStyle(
-          3,
-          0xffffff
-        );
-    }
-
-    this.dragObject
-      .setDepth(2000)
-      .setAlpha(0.85);
-
-    this.toast(
-      'ลากไปวางบนแท่น'
-    );
   }
 
-  // =====================================================
-  // FINISH DRAG
-  // =====================================================
+  onDown(p) {
+    if (this.drag || p.y < this.listTop) return;
+    Object.assign(this.scroll, { on: true, moved: false, x0: p.x, l0: this.listLayer.x });
+  }
 
-  finishUnitDrag(
-    pointer
-  ) {
-
-    if (
-      !this.draggingUnit
-    ) {
+  onMove(p) {
+    if (this.drag) {
+      this.drag.obj.setPosition(p.x, p.y);
+      const slot = this.slotAt(p.x, p.y);
+      this.slotGlow.setVisible(slot >= 0).setX(this.slotX[Math.max(0, slot)]);
       return;
     }
+    const s = this.scroll;
+    if (!p.isDown || !s.on || this.minX >= 0) return;
+    if (Math.abs(p.x - s.x0) > 8) s.moved = true;
+    if (s.moved) this.scrollList(s.l0 + p.x - s.x0);
+  }
 
-    const key =
-      this.dragKey;
+  onUp(p, outside = false) {
+    this.scroll.on = false;
+    if (this.drag) this.finishDrag(p, outside);
+  }
 
-    const targetSlot =
-      this.getSlotAt(
-        pointer.x,
-        pointer.y
-      );
+  // ---------- ลาก & วาง ----------
+  startDrag(p, key, from, src) {
+    if (this.drag) return;
+    const obj = this.makePortrait(p.x, p.y, key, 90).setDepth(2000).setAlpha(0.85);
+    src.setAlpha(0.3);   // ตัวต้นทางจางลงระหว่างลาก (ยังไม่แตะ SAVE จนกว่าจะปล่อย)
+    this.drag = { key, from, obj };
+    this.toast('ลากไปวางบนแท่น');
+  }
 
-    // -----------------------------------------------------
-    // วางบนแท่น
-    // -----------------------------------------------------
-
-    if (
-      targetSlot >= 0
-    ) {
-
-      const oldKey =
-        SAVE.team[targetSlot];
-
-      // ---------------------------------------------------
-      // ช่องมีตัวละคร
-      // ---------------------------------------------------
-
-      if (oldKey) {
-
-        // ลากจากแท่น
-        if (
-          this.dragFromSlot >= 0
-        ) {
-
-          // ใส่ตัวเดิมกลับเข้าไป
-          SAVE.team.splice(
-            this.dragFromSlot,
-            0,
-            oldKey
-          );
-
-          // หาตำแหน่งใหม่ของช่องปลายทาง
-          let targetIndex =
-            targetSlot;
-
-          if (
-            this.dragFromSlot <
-            targetSlot
-          ) {
-            targetIndex--;
-          }
-
-          // ย้าย key ไปตำแหน่งปลายทาง
-          SAVE.team.splice(
-            this.dragFromSlot <
-              targetIndex
-              ? targetIndex
-              : targetIndex,
-            0,
-            key
-          );
-
-          // ลบตัวซ้ำ
-          const seen = [];
-
-          SAVE.team =
-            SAVE.team.filter(
-              k => {
-
-                if (
-                  seen.includes(k)
-                ) {
-                  return false;
-                }
-
-                seen.push(k);
-
-                return true;
-              }
-            );
-
-        } else {
-
-          // จากการ์ดด้านล่าง
-          // ถ้าตัวนี้อยู่ในทีมแล้ว ไม่เพิ่มซ้ำ
-          if (
-            !SAVE.team.includes(key)
-          ) {
-
-            SAVE.team[targetSlot] =
-              key;
-          }
-        }
-
+  // คำนวณทีมใหม่หลังวาง (ไม่แก้ของเดิม)
+  //   slot  = ช่องแท่นที่วาง (-1 = ไม่ได้วางบนแท่น), toList = ปล่อยที่พื้นที่รายการด้านล่าง
+  //   from  = ช่องเดิมในทีม (-1 = ลากมาจากรายการ)
+  moveUnit(team, key, from, slot, toList) {
+    team = team.slice();
+    if (slot >= 0) {
+      if (from >= 0) {   // ลากจากแท่น: ช่องมีตัวอยู่ = สลับที่, ช่องว่าง = ไปต่อท้ายทีม
+        if (slot < team.length) [team[from], team[slot]] = [team[slot], team[from]];
+        else { team.splice(from, 1); team.push(key); }
+      } else if (slot < team.length) {   // ลากจากรายการ: วางทับตัวเดิม / เติมช่องว่าง
+        team[slot] = key;
       } else {
-
-        // -------------------------------------------------
-        // ช่องว่าง
-        // -------------------------------------------------
-
-        if (
-          !SAVE.team.includes(key)
-        ) {
-
-          SAVE.team.splice(
-            targetSlot,
-            0,
-            key
-          );
-
-        } else {
-
-          // ถ้ามีอยู่แล้วแต่ลากจากแท่น
-          if (
-            this.dragFromSlot >= 0
-          ) {
-
-            SAVE.team.splice(
-              targetSlot,
-              0,
-              key
-            );
-          }
-        }
+        team.push(key);
       }
-
-      // ---------------------------------------------------
-      // จำกัดจำนวนทีม
-      // ---------------------------------------------------
-
-      SAVE.team =
-        SAVE.team
-          .filter(
-            (v, i, arr) =>
-              arr.indexOf(v) === i
-          )
-          .slice(
-            0,
-            TEAM_SIZE
-          );
-
-      writeSave();
-
-      this.cleanupDrag();
-
-      this.refresh();
-
-      return;
+    } else if (from >= 0 && toList && team.length > 1) {
+      team.splice(from, 1);   // ลากลงรายการ = เอาออกจากทีม (เหลืออย่างน้อย 1 ตัว)
     }
+    return team.filter((k, i) => team.indexOf(k) === i).slice(0, TEAM_SIZE);
+  }
 
-    // =====================================================
-    // ปล่อยนอกแท่น
-    // =====================================================
-
-    if (
-      this.dragFromSlot >= 0
-    ) {
-
-      SAVE.team.splice(
-        this.dragFromSlot,
-        0,
-        key
-      );
-
-      writeSave();
+  finishDrag(p, cancel) {
+    const { key, from, obj } = this.drag;
+    obj.destroy();
+    this.drag = null;
+    this.slotGlow.setVisible(false);
+    if (!cancel) {
+      const next = this.moveUnit(SAVE.team, key, from, this.slotAt(p.x, p.y), p.y >= this.listTop);
+      if (next.join() !== SAVE.team.join()) { SAVE.team = next; writeSave(); }
     }
-
-    this.cleanupDrag();
-
     this.refresh();
   }
 
-  // =====================================================
-  // FIND SLOT
-  // =====================================================
-
-  getSlotAt(
-    x,
-    y
-  ) {
-
-    // พื้นที่แท่น
-    if (
-      y < 85 ||
-      y > 220
-    ) {
-      return -1;
-    }
-
-    let nearest = -1;
-
-    let distance = 9999;
-
-    this.slotX.forEach(
-      (slotX, i) => {
-
-        const d =
-          Math.abs(
-            x - slotX
-          );
-
-        if (
-          d < 60 &&
-          d < distance
-        ) {
-
-          distance = d;
-
-          nearest = i;
-        }
-      }
-    );
-
-    return nearest;
+  // ช่องแท่นที่ใกล้ตำแหน่งที่สุด (ห่างไม่เกิน 60) หรือ -1
+  slotAt(x, y) {
+    if (y < 75 || y > this.barY - 14) return -1;
+    let best = -1, dist = 60 * this.ps;
+    this.slotX.forEach((sx, i) => { if (Math.abs(x - sx) < dist) { dist = Math.abs(x - sx); best = i; } });
+    return best;
   }
-
-  // =====================================================
-  // CLEANUP DRAG
-  // =====================================================
-
-  cleanupDrag() {
-
-    if (
-      this.dragObject
-    ) {
-
-      this.dragObject.destroy();
-
-      this.dragObject = null;
-    }
-
-    this.draggingUnit = false;
-
-    this.dragKey = null;
-
-    this.dragFromSlot = -1;
-
-    this.dragInList = false;
-
-    this.dragMoved = false;
-  }
-
-  // =====================================================
-  // TOAST
-  // =====================================================
 
   toast(message) {
-
-    if (
-      !this.toastText
-    ) {
-      return;
-    }
-
-    this.toastText
-      .setText(message)
-      .setAlpha(1);
-
-    this.tweens.killTweensOf(
-      this.toastText
-    );
-
-    this.tweens.add({
-
-      targets:
-        this.toastText,
-
-      alpha: 0,
-
-      delay: 1400,
-
-      duration: 500
-    });
+    this.toastText.setText(message).setAlpha(1);
+    this.tweens.killTweensOf(this.toastText);
+    this.tweens.add({ targets: this.toastText, alpha: 0, delay: 1400, duration: 500 });
   }
 }

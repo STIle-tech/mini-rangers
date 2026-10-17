@@ -2,13 +2,51 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<script>
+  // แสดงข้อผิดพลาดบนหน้าจอ (กันจอดำเงียบๆ โดยเฉพาะบนมือถือที่เปิด Console ไม่ได้) ต้องอยู่ก่อนสคริปต์อื่นทั้งหมด
+  (function () {
+    var seen = {};
+    function show(msg) {
+      if (/^Script error/.test(msg) && location.protocol === 'file:') msg = 'Script error (เปิดแบบ file:// เบราว์เซอร์ซ่อนข้อความจริง) -> เปิดผ่าน http://localhost แทนเพื่อดูข้อความ error จริง';
+      seen[msg] = (seen[msg] || 0) + 1;
+      var d = document.getElementById('err');
+      if (!d) {
+        d = document.createElement('pre'); d.id = 'err'; d.title = 'คลิกเพื่อปิด'; d.onclick = function () { d.style.display = 'none'; };
+        d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;max-height:90px;overflow:auto;margin:0;padding:6px 8px;background:#b00020;color:#fff;font:12px monospace;z-index:100000;white-space:pre-wrap;cursor:pointer';
+        (document.body || document.documentElement).appendChild(d);
+      }
+      d.style.display = 'block';
+      d.textContent = Object.keys(seen).map(function (k) { return k + (seen[k] > 1 ? '  x' + seen[k] : ''); }).join('\n');
+    }
+    addEventListener('error', function (e) {
+      show(e.target && e.target.src ? 'โหลดไฟล์ไม่ได้: ' + e.target.src : e.message + '  (' + String(e.filename || '').split('/').pop() + ':' + e.lineno + ')');
+    }, true);
+    addEventListener('unhandledrejection', function (e) { show('Promise: ' + (e.reason && e.reason.message || e.reason)); });
+  })();
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Mini Lane Rangers</title>
+
+<!-- มือถือ: ติดตั้งลงหน้าจอหลัก (PWA) เปิดเต็มจอ — ใส่เฉพาะตอนเปิดผ่าน http/https (แบบ file:// เบราว์เซอร์บล็อก) -->
+<meta name="theme-color" content="#1b1b2f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Lane Rangers">
+<script>
+  if (location.protocol !== 'file:') {
+    [['manifest', 'manifest.json'], ['apple-touch-icon', 'assets/icons/app-192.png'], ['icon', 'assets/icons/app-192.png']].forEach(function (l) {
+      var e = document.createElement('link'); e.rel = l[0]; e.href = l[1]; document.head.appendChild(e);
+    });
+  }
+</script>
+
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js"></script>
 </head>
 <body>
 <div id="game"></div>
+<div id="rotate"><div>📱↻<br>กรุณาหมุนจอเป็นแนวนอน</div></div>
 
 <!-- ลำดับการโหลดสำคัญ: config -> units -> save -> scenes -> main -->
 <script src="js/config.js"></script>
@@ -22,7 +60,12 @@
 <script src="js/scenes/CharacterScene.js"></script>
 <script src="js/scenes/CollectionScene.js"></script>
 <script src="js/scenes/GachaScene.js"></script>
+<script src="js/scenes/StageScene.js"></script>
 <script src="js/scenes/GameScene.js"></script>
 <script src="js/main.js"></script>
+<script>
+  // เก็บไฟล์ไว้ในเครื่องเพื่อเปิดเร็ว/ออฟไลน์ (ใช้ได้เมื่อเปิดผ่าน https หรือ localhost)
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
 </body>
 </html>

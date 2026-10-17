@@ -1,1525 +1,188 @@
 // =====================================================================
-// GachaScene
-// หน้ากาชา
+// GachaScene — หน้ากาชา: สุ่มด้วยเพชร ได้ทอง / อัปเลเวลฟรี / ค้นพบตัวละครใหม่
 // =====================================================================
+const GACHA_X = 300;         // กึ่งกลางแผงหลัก (ซ้าย)
+const GACHA_RIGHT_X = 675;   // กึ่งกลางคอลัมน์การ์ดแบนเนอร์ (ขวา)
 
 class GachaScene extends Phaser.Scene {
-
-  constructor() {
-    super('gacha');
-  }
-
-
-  // ===================================================================
-  // CREATE
-  // ===================================================================
+  constructor() { super('gacha'); }
 
   create() {
-
     this.busy = false;
-
-
-    // ================================================================
-    // BACKGROUND
-    // ================================================================
-
-    if (this.textures.exists('gacha_bg')) {
-
-      this.add.image(
-        W / 2,
-        H / 2,
-        'gacha_bg'
-      )
-      .setDisplaySize(W, H)
-      .setDepth(0);
-
-    } else {
-
-      // กันจอดำกรณีไม่มีภาพ
-      this.add.rectangle(
-        W / 2,
-        H / 2,
-        W,
-        H,
-        0x7bb9d8
-      ).setDepth(0);
-
-    }
-
-
-    // ================================================================
-    // TOP BAR
-    // ================================================================
-
-    this.add.rectangle(
-      W / 2,
-      32,
-      W,
-      64,
-      0x17243c,
-      0.90
-    ).setDepth(1);
-
-
-    // ปุ่มกลับ
-    const back = this.add.text(
-      28,
-      32,
-      '←',
-      {
-        fontFamily: FONT,
-        fontSize: '34px',
-        color: '#ffffff',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(5)
-      .setInteractive({
-        useHandCursor: true
-      });
-
-
-    back.on('pointerdown', () => {
-      this.scene.start('lobby');
-    });
-
-
-    // ชื่อ GACHA
-    this.add.text(
-      95,
-      32,
-      'GACHA',
-      {
-        fontFamily: FONT,
-        fontSize: '30px',
-        color: '#ffffff',
-        fontStyle: 'bold',
-        stroke: '#202b50',
-        strokeThickness: 5
-      }
-    )
-      .setOrigin(0, 0.5)
-      .setDepth(5);
-
-
-    // เครื่องหมาย ?
-    const help = this.add.circle(
-      190,
-      32,
-      15,
-      0xffd23f
-    )
-      .setStrokeStyle(2, 0xffffff)
-      .setDepth(5)
-      .setInteractive({
-        useHandCursor: true
-      });
-
-
-    this.add.text(
-      190,
-      32,
-      '?',
-      {
-        fontFamily: FONT,
-        fontSize: '18px',
-        color: '#4a2a00',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(6);
-
-
-    help.on('pointerdown', () => {
-      this.toast('ใช้เพชรเพื่อสุ่มรางวัล');
-    });
-
-
-    // ================================================================
-    // CURRENCY
-    // ================================================================
-
-    this.addCurrencyBar();
-
-
-    // ================================================================
-    // MAIN GACHA PANEL
-    // ================================================================
-
-    this.createMainPanel();
-
-
-    // ================================================================
-    // RIGHT SIDE
-    // ================================================================
-
-    this.createRightPanel();
-
-
-    // ================================================================
-    // BOTTOM BUTTONS
-    // ================================================================
-
-    this.createSummonButtons();
-
-
-    // ================================================================
-    // RESULT CONTAINER
-    // ================================================================
-
-    this.res = this.add.container(
-      0,
-      0
-    )
-      .setDepth(20);
-
-
-    // ================================================================
-    // TOAST
-    // ================================================================
-
-    this.toastText = this.add.text(
-      W / 2,
-      H - 55,
-      '',
-      {
-        fontFamily: FONT,
-        fontSize: '18px',
-        color: '#ffffff',
-        backgroundColor: '#000000dd',
-        padding: {
-          x: 18,
-          y: 9
-        },
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setAlpha(0)
-      .setDepth(100);
-
-
-    this.refresh();
-  }
-
-
-  // ===================================================================
-  // CURRENCY BAR
-  // ===================================================================
-
-  addCurrencyBar() {
-
-    // เพชร
-    this.add.circle(
-      W - 430,
-      32,
-      15,
-      0xe84a9a
-    )
-      .setStrokeStyle(2, 0xffffff)
-      .setDepth(5);
-
-
-    this.gemText = this.add.text(
-      W - 405,
-      32,
-      '',
-      {
-        fontFamily: FONT,
-        fontSize: '18px',
-        color: '#ffffff',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0, 0.5)
-      .setDepth(5);
-
-
-    // +
-    const plus = this.add.circle(
-      W - 350,
-      32,
-      13,
-      0x46bd59
-    )
-      .setStrokeStyle(2, 0xffffff)
-      .setDepth(5)
-      .setInteractive({
-        useHandCursor: true
-      });
-
-
-    this.add.text(
-      W - 350,
-      32,
-      '+',
-      {
-        fontFamily: FONT,
-        fontSize: '19px',
-        color: '#ffffff',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(6);
-
-
-    plus.on('pointerdown', () => {
-      this.toast('เพชรสามารถหาได้จากการเล่นและรางวัลสะสม');
-    });
-
-
-    // ตั๋ว
-    if (this.textures.exists('gacha_ticket')) {
-
-      this.add.image(
-        W - 290,
-        32,
-        'gacha_ticket'
-      )
-        .setDisplaySize(27, 27)
-        .setDepth(5);
-
-    } else {
-
-      this.add.rectangle(
-        W - 290,
-        32,
-        25,
-        25,
-        0x4da6ff
-      )
-        .setDepth(5);
-
-    }
-
-
-    this.ticketText = this.add.text(
-      W - 270,
-      32,
-      '0',
-      {
-        fontFamily: FONT,
-        fontSize: '17px',
-        color: '#ffffff',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0, 0.5)
-      .setDepth(5);
-  }
-
-
-  // ===================================================================
-  // MAIN PANEL
-  // ===================================================================
-
-  createMainPanel() {
-
-    const x = 365;
-    const y = 250;
-    const w = 590;
-    const h = 355;
-
+    const x = GACHA_X, y = 250;
+
+    // พื้นหลัง (ไม่มีรูปก็ใช้สีแทน กันจอดำ)
+    this.skin('gacha_bg', W / 2, H / 2, W, H, 0, () => this.add.rectangle(W / 2, H / 2, W, H, 0x7bb9d8));
+
+    // แถบบน
+    this.add.rectangle(W / 2, 32, W, 64, 0x17243c, 0.9).setDepth(1);
+    this.click(this.t(28, 32, '←', 34), () => this.scene.start('lobby'));
+    this.t(95, 32, 'GACHA', 30, '#fff', { stroke: '#202b50', strokeThickness: 5 }).setOrigin(0, 0.5);
+    this.roundBtn(190, 32, 15, 0xffd23f, '?', 18, '#4a2a00', 'ใช้เพชรเพื่อสุ่มรางวัล');
+
+    // เพชร + ตั๋ว
+    this.add.circle(W - 430, 32, 15, 0xe84a9a).setStrokeStyle(2, 0xffffff).setDepth(5);
+    this.gemText = this.t(W - 405, 32, '', 18).setOrigin(0, 0.5);
+    this.roundBtn(W - 350, 32, 13, 0x46bd59, '+', 19, '#fff', 'เพชรสามารถหาได้จากการเล่นและรางวัลสะสม');
+    this.skin('gacha_ticket', W - 290, 32, 27, 27, 5, () => this.add.rectangle(W - 290, 32, 25, 25, 0x4da6ff));
+    this.t(W - 270, 32, '0', 17).setOrigin(0, 0.5);
 
     // แผงหลัก
-    if (this.textures.exists('gacha_result_panel')) {
+    this.mainPanel = this.skin('gacha_result_panel', x, y, 520, 355, 2,
+      () => this.add.rectangle(x, y, 520, 355, 0x7a238f).setStrokeStyle(5, 0xf3c83b));
+    this.add.rectangle(x - 200, y - 140, 90, 34, 0xe52d55).setDepth(4);
+    this.t(x - 200, y - 140, 'ใหม่', 18);
+    this.t(x, y - 125, 'เปิดตัวเรนเจอร์ใหม่', 25, '#fff', { stroke: '#52205f', strokeThickness: 4 });
+    this.t(x, y - 92, 'ULTRA RARE', 19, '#ffd23f');
+    this.add.circle(x, y + 15, 65, 0xffe9ff, 0.15).setStrokeStyle(3, 0xffffff, 0.5).setDepth(3);
+    this.add.circle(x, y + 15, 30, 0xffffff, 0.8).setDepth(3);
+    [[-235, '‹', 'Banner ก่อนหน้า'], [235, '›', 'Banner ถัดไป']].forEach(([dx, ch, msg]) =>
+      this.click(this.t(x + dx, y + 10, ch, 70).setDepth(6), () => this.toast(msg)));
+    this.t(x, y + 145, 'ULTRA RARE ★7~★8', 21, '#ffd23f', { stroke: '#542000', strokeThickness: 4 });
+    this.roundBtn(x + 235, y + 145, 14, 0x8e245e, '?', 14, '#fff', 'รายละเอียดอัตราสุ่มรางวัล');
 
-      this.mainPanel = this.add.image(
-        x,
-        y,
-        'gacha_result_panel'
-      )
-        .setDisplaySize(w, h)
-        .setDepth(2);
-
-    } else {
-
-      this.mainPanel = this.add.rectangle(
-        x,
-        y,
-        w,
-        h,
-        0x7a238f
-      )
-        .setStrokeStyle(5, 0xf3c83b)
-        .setDepth(2);
-
-    }
-
-
-    // แถบ NEW
-    this.add.rectangle(
-      x - 220,
-      y - 140,
-      90,
-      34,
-      0xe52d55
-    )
-      .setDepth(4);
-
-
-    this.add.text(
-      x - 220,
-      y - 140,
-      'ใหม่',
-      {
-        fontFamily: FONT,
-        fontSize: '18px',
-        color: '#ffffff',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(5);
-
-
-    // ชื่อ Banner
-    this.add.text(
-      x,
-      y - 125,
-      'เปิดตัวเรนเจอร์ใหม่',
-      {
-        fontFamily: FONT,
-        fontSize: '25px',
-        color: '#ffffff',
-        fontStyle: 'bold',
-        stroke: '#52205f',
-        strokeThickness: 4
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(5);
-
-
-    this.add.text(
-      x,
-      y - 92,
-      'ULTRA RARE',
-      {
-        fontFamily: FONT,
-        fontSize: '19px',
-        color: '#ffd23f',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(5);
-
-
-    // เอฟเฟกต์กลาง
-    this.add.circle(
-      x,
-      y + 15,
-      65,
-      0xffe9ff,
-      0.15
-    )
-      .setStrokeStyle(
-        3,
-        0xffffff,
-        0.5
-      )
-      .setDepth(3);
-
-
-    this.add.circle(
-      x,
-      y + 15,
-      30,
-      0xffffff,
-      0.8
-    )
-      .setDepth(3);
-
-
-    // ลูกศรซ้าย
-    const left = this.add.text(
-      x - 250,
-      y + 10,
-      '‹',
-      {
-        fontFamily: FONT,
-        fontSize: '70px',
-        color: '#ffffff',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(6)
-      .setInteractive({
-        useHandCursor: true
+    // คอลัมน์ขวา: แท็บ + การ์ดแบนเนอร์
+    const rx = GACHA_RIGHT_X;
+    this.t(rx - 35, 85, 'RANGERS', 17, '#ffe066', { backgroundColor: '#7a275d', padding: { x: 12, y: 7 } });
+    this.t(rx + 70, 85, 'อุปกรณ์', 16, '#fff', { fontStyle: 'normal', backgroundColor: '#6e6e6e', padding: { x: 10, y: 7 } });
+    [['ULTRA RARE', '★7 ~ ★8', 0x7a3a78], ['EVENT', '31 วัน', 0x4168a8], ['EVENT', '31 วัน', 0x4168a8], ['สุ่มครบ 100 ครั้ง', '0 / 100', 0x8c4a91]]
+      .forEach(([title, sub, color], i) => {
+        const cy = 135 + i * 78;
+        this.click(this.add.rectangle(rx, cy, 170, 70, color).setStrokeStyle(3, 0xf2d34d).setDepth(4), () => this.toast(`${title} : ${sub}`));
+        this.t(rx, cy - 15, title, 15);
+        this.t(rx, cy + 14, sub, 14, '#ffe066');
       });
 
+    // ปุ่มสุ่ม + ประวัติ
+    this.btn1 = this.summonBtn(x - 110, H - 95, '1 ครั้ง', GACHA_COST, 1);
+    this.btn10 = this.summonBtn(x + 110, H - 95, '10 ครั้ง', GACHA_COST_10, 10);
+    this.click(this.add.rectangle(W - 115, H - 30, 120, 38, 0x628e38).setStrokeStyle(3, 0xd6d95c).setDepth(5), () => this.toast('ยังไม่มีประวัติการสุ่ม'));
+    this.t(W - 115, H - 30, 'ประวัติ', 16).setDepth(6);
 
-    left.on('pointerdown', () => {
-      this.toast('Banner ก่อนหน้า');
-    });
-
-
-    // ลูกศรขวา
-    const right = this.add.text(
-      x + 250,
-      y + 10,
-      '›',
-      {
-        fontFamily: FONT,
-        fontSize: '70px',
-        color: '#ffffff',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(6)
-      .setInteractive({
-        useHandCursor: true
-      });
-
-
-    right.on('pointerdown', () => {
-      this.toast('Banner ถัดไป');
-    });
-
-
-    // ชื่อเรท
-    this.add.text(
-      x,
-      y + 145,
-      'ULTRA RARE ★7~★8',
-      {
-        fontFamily: FONT,
-        fontSize: '21px',
-        color: '#ffd23f',
-        fontStyle: 'bold',
-        stroke: '#542000',
-        strokeThickness: 4
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(5);
-
-
-    // Info
-    const info = this.add.circle(
-      x + 245,
-      y + 145,
-      14,
-      0x8e245e
-    )
-      .setStrokeStyle(2, 0xffffff)
-      .setDepth(5)
-      .setInteractive({
-        useHandCursor: true
-      });
-
-
-    this.add.text(
-      x + 245,
-      y + 145,
-      '?',
-      {
-        fontFamily: FONT,
-        fontSize: '14px',
-        color: '#ffffff',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(6);
-
-
-    info.on('pointerdown', () => {
-      this.toast('รายละเอียดอัตราสุ่มรางวัล');
-    });
+    this.res = this.add.container(0, 0).setDepth(20);   // ผลการสุ่ม
+    this.toastText = this.t(W / 2, H - 55, '', 18, '#fff', { backgroundColor: '#000000dd', padding: { x: 18, y: 9 } }).setAlpha(0).setDepth(100);
+    this.input.keyboard.on('keydown-ESC', () => this.scene.start('lobby'));
+    this.refresh();
   }
 
-
-  // ===================================================================
-  // RIGHT PANEL
-  // ===================================================================
-
-  createRightPanel() {
-
-    const x = 865;
-
-
-    this.add.text(
-      x,
-      85,
-      'RANGERS',
-      {
-        fontFamily: FONT,
-        fontSize: '19px',
-        color: '#ffe066',
-        fontStyle: 'bold',
-        backgroundColor: '#7a275d',
-        padding: {
-          x: 15,
-          y: 7
-        }
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(5);
-
-
-    this.add.text(
-      x + 100,
-      85,
-      'อุปกรณ์',
-      {
-        fontFamily: FONT,
-        fontSize: '17px',
-        color: '#ffffff',
-        backgroundColor: '#6e6e6e',
-        padding: {
-          x: 12,
-          y: 7
-        }
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(5);
-
-
-    // การ์ด Ultra Rare
-    this.createBannerCard(
-      x,
-      150,
-      'ULTRA RARE',
-      '★7 ~ ★8',
-      0x7a3a78
-    );
-
-
-    // การ์ด Event
-    this.createBannerCard(
-      x,
-      245,
-      'EVENT',
-      '31 วัน',
-      0x4168a8
-    );
-
-
-    this.createBannerCard(
-      x,
-      340,
-      'EVENT',
-      '31 วัน',
-      0x4168a8
-    );
-
-
-    // การันตี
-    this.createBannerCard(
-      x,
-      435,
-      'สุ่มครบ 100 ครั้ง',
-      '0 / 100',
-      0x8c4a91
-    );
+  // ---------- ตัวช่วย ----------
+  t(x, y, s, size, color = '#fff', style = {}) {
+    return this.add.text(x, y, s, { fontFamily: FONT, fontSize: size + 'px', color, fontStyle: 'bold', ...style }).setOrigin(0.5).setDepth(5);
   }
 
+  click(obj, fn) { return obj.setInteractive({ useHandCursor: true }).on('pointerdown', fn); }
 
-  // ===================================================================
-  // BANNER CARD
-  // ===================================================================
-
-  createBannerCard(
-    x,
-    y,
-    title,
-    sub,
-    color
-  ) {
-
-    const bg = this.add.rectangle(
-      x,
-      y,
-      205,
-      78,
-      color
-    )
-      .setStrokeStyle(
-        3,
-        0xf2d34d
-      )
-      .setDepth(4)
-      .setInteractive({
-        useHandCursor: true
-      });
-
-
-    this.add.text(
-      x,
-      y - 17,
-      title,
-      {
-        fontFamily: FONT,
-        fontSize: '15px',
-        color: '#ffffff',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(5);
-
-
-    this.add.text(
-      x,
-      y + 15,
-      sub,
-      {
-        fontFamily: FONT,
-        fontSize: '14px',
-        color: '#ffe066',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(5);
-
-
-    bg.on(
-      'pointerdown',
-      () => {
-        this.toast(
-          `${title} : ${sub}`
-        );
-      }
-    );
+  // รูปที่ขนาด w×h ถ้าไม่มีรูปใช้ fallback()
+  skin(key, x, y, w, h, depth, fallback) {
+    return (this.textures.exists(key) ? this.add.image(x, y, key).setDisplaySize(w, h) : fallback()).setDepth(depth);
   }
 
-
-  // ===================================================================
-  // SUMMON BUTTONS
-  // ===================================================================
-
-  createSummonButtons() {
-
-    const y = H - 95;
-
-
-    // ---------------------------------------------------------------
-    // ×1
-    // ---------------------------------------------------------------
-
-    this.btn1 = this.createSummonButton(
-      330,
-      y,
-      'ครั้ง',
-      GACHA_COST,
-      1
-    );
-
-
-    // ---------------------------------------------------------------
-    // ×10
-    // ---------------------------------------------------------------
-
-    this.btn10 = this.createSummonButton(
-      555,
-      y,
-      '6+1 ครั้ง',
-      GACHA_COST_10,
-      10
-    );
-
-
-    // ประวัติ
-    const history = this.add.rectangle(
-      W - 115,
-      H - 30,
-      120,
-      38,
-      0x628e38
-    )
-      .setStrokeStyle(
-        3,
-        0xd6d95c
-      )
-      .setDepth(5)
-      .setInteractive({
-        useHandCursor: true
-      });
-
-
-    this.add.text(
-      W - 115,
-      H - 30,
-      'ประวัติ',
-      {
-        fontFamily: FONT,
-        fontSize: '16px',
-        color: '#ffffff',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(6);
-
-
-    history.on(
-      'pointerdown',
-      () => {
-        this.toast('ยังไม่มีประวัติการสุ่ม');
-      }
-    );
+  // ปุ่มกลม + ตัวอักษร กดแล้วขึ้น toast
+  roundBtn(x, y, r, color, label, size, textColor, msg) {
+    this.click(this.add.circle(x, y, r, color).setStrokeStyle(2, 0xffffff).setDepth(5), () => this.toast(msg));
+    this.t(x, y, label, size, textColor).setDepth(6);
   }
 
-
-  // ===================================================================
-  // SUMMON BUTTON
-  // ===================================================================
-
-  createSummonButton(
-    x,
-    y,
-    label,
-    cost,
-    count
-  ) {
-
-    let bg;
-
-
-    if (
-      this.textures.exists(
-        'gacha_summon_button'
-      )
-    ) {
-
-      bg = this.add.image(
-        x,
-        y,
-        'gacha_summon_button'
-      )
-        .setDisplaySize(
-          205,
-          66
-        )
-        .setDepth(5)
-        .setInteractive({
-          useHandCursor: true
-        });
-
-    } else {
-
-      bg = this.add.rectangle(
-        x,
-        y,
-        205,
-        66,
-        0xffdc35
-      )
-        .setStrokeStyle(
-          3,
-          0xffffff
-        )
-        .setDepth(5)
-        .setInteractive({
-          useHandCursor: true
-        });
-
-    }
-
-
-    this.add.text(
-      x - 42,
-      y,
-      label,
-      {
-        fontFamily: FONT,
-        fontSize: '19px',
-        color: '#5a3b00',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(6);
-
-
-    // ไอคอนเพชร
-    this.add.circle(
-      x + 35,
-      y,
-      11,
-      0xe84a9a
-    )
-      .setStrokeStyle(
-        2,
-        0xffffff
-      )
-      .setDepth(6);
-
-
-    this.add.text(
-      x + 57,
-      y,
-      String(cost),
-      {
-        fontFamily: FONT,
-        fontSize: '18px',
-        color: '#5a3b00',
-        fontStyle: 'bold'
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(6);
-
-
-    bg.on(
-      'pointerdown',
-      () => {
-        this.pull(
-          count,
-          cost
-        );
-      }
-    );
-
-
-    bg.on(
-      'pointerover',
-      () => {
-        this.tweens.add({
-          targets: bg,
-          scaleX: 1.04,
-          scaleY: 1.04,
-          duration: 100
-        });
-      }
-    );
-
-
-    bg.on(
-      'pointerout',
-      () => {
-        this.tweens.add({
-          targets: bg,
-          scaleX: 1,
-          scaleY: 1,
-          duration: 100
-        });
-      }
-    );
-
-
-    return {
-      bg: bg,
-      cost: cost
-    };
+  summonBtn(x, y, label, cost, count) {
+    const bg = this.skin('gacha_summon_button', x, y, 205, 66, 5, () => this.add.rectangle(x, y, 205, 66, 0xffdc35).setStrokeStyle(3, 0xffffff));
+    this.t(x - 42, y, label, 19, '#5a3b00').setDepth(6);
+    this.add.circle(x + 35, y, 11, 0xe84a9a).setStrokeStyle(2, 0xffffff).setDepth(6);
+    this.t(x + 57, y, String(cost), 18, '#5a3b00').setDepth(6);
+    const base = bg.scaleX;   // ขยายจากขนาดจริง (ถ้าเป็นรูป scale ไม่ใช่ 1)
+    const zoom = k => () => this.tweens.add({ targets: bg, scaleX: base * k, scaleY: base * k, duration: 100 });
+    this.click(bg, () => this.pull(count, cost)).on('pointerover', zoom(1.04)).on('pointerout', zoom(1));
+    return { bg, cost };
   }
-
-
-  // ===================================================================
-  // REFRESH
-  // ===================================================================
 
   refresh() {
-
-    if (this.gemText) {
-
-      this.gemText.setText(
-        String(SAVE.gems)
-      );
-
-    }
-
-
-    if (this.ticketText) {
-
-      this.ticketText.setText(
-        '0'
-      );
-
-    }
-
-
-    if (this.btn1) {
-
-      this.btn1.bg.setAlpha(
-        SAVE.gems >= this.btn1.cost
-          ? 1
-          : 0.45
-      );
-
-    }
-
-
-    if (this.btn10) {
-
-      this.btn10.bg.setAlpha(
-        SAVE.gems >= this.btn10.cost
-          ? 1
-          : 0.45
-      );
-
-    }
+    this.gemText.setText(String(SAVE.gems));
+    [this.btn1, this.btn10].forEach(b => b.bg.setAlpha(SAVE.gems >= b.cost ? 1 : 0.45));
   }
 
-
-  // ===================================================================
-  // PULL
-  // ===================================================================
-
-  pull(
-    count,
-    cost
-  ) {
-
-    if (this.busy) {
-      return;
-    }
-
-
+  // ---------- สุ่ม ----------
+  pull(count, cost) {
+    if (this.busy) return;
     if (SAVE.gems < cost) {
-
-      this.toast(
-        'เพชรไม่พอ'
-      );
-
-
-      if (this.gemText) {
-
-        this.tweens.add({
-          targets: this.gemText,
-          alpha: 0.2,
-          duration: 80,
-          yoyo: true,
-          repeat: 2
-        });
-
-      }
-
+      this.toast('เพชรไม่พอ');
+      this.tweens.add({ targets: this.gemText, alpha: 0.2, duration: 80, yoyo: true, repeat: 2 });
       return;
     }
-
-
     this.busy = true;
-
-
     SAVE.gems -= cost;
-
-
-    const results = [];
-
-
-    for (
-      let i = 0;
-      i < count;
-      i++
-    ) {
-
-      results.push(
-        this.roll()
-      );
-
-    }
-
-
+    const results = Array.from({ length: count }, () => this.roll());
     writeSave();
-
-
     this.refresh();
 
-
-    // Animation
+    const s = this.mainPanel.scaleX;
     this.tweens.add({
-
-      targets: this.mainPanel,
-
-      scaleX: 1.025,
-      scaleY: 1.025,
-
-      duration: 100,
-
-      yoyo: true,
-
-      repeat: 4,
-
-      onComplete: () => {
-
-        this.showResults(
-          results
-        );
-
-        this.busy = false;
-
-      }
-
+      targets: this.mainPanel, scaleX: s * 1.025, scaleY: s * 1.025, duration: 100, yoyo: true, repeat: 4,
+      onComplete: () => { this.showResults(results); this.busy = false; },
     });
   }
 
-
-  // ===================================================================
-  // ROLL
-  // ===================================================================
-
+  // สุ่ม 1 ครั้ง ตามน้ำหนักใน GACHA_PRIZES (ถ้าของที่ได้ใช้ไม่ได้ จะถอยเป็นทอง)
   roll() {
-
-    const total =
-      GACHA_PRIZES.reduce(
-        (s, p) => s + p.w,
-        0
-      );
-
-
-    let r =
-      Math.random() *
-      total;
-
-
-    let prize =
-      GACHA_PRIZES[0];
-
-
-    for (
-      const p of GACHA_PRIZES
-    ) {
-
-      if (r < p.w) {
-
-        prize = p;
-        break;
-
-      }
-
-      r -= p.w;
-    }
-
-
-    // ---------------------------------------------------------------
-    // LEVEL
-    // ---------------------------------------------------------------
-
-    if (
-      prize.kind === 'level'
-    ) {
-
-      const candidates =
-        UNIT_KEYS.filter(
-          k =>
-            SAVE.seen[k] &&
-            SAVE.levels[k] < MAX_LEVEL
-        );
-
-
-      if (candidates.length) {
-
-        const key =
-          Phaser.Utils.Array.GetRandom(
-            candidates
-          );
-
-
-        SAVE.levels[key]++;
-
-
-        return {
-
-          kind: 'level',
-
-          key: key,
-
-          text:
-            `${UNITS[key].name}\nอัปเป็น Lv ${SAVE.levels[key]}`
-
-        };
-
-      }
-
-
-      prize =
-        GACHA_PRIZES[0];
-    }
-
-
-    // ---------------------------------------------------------------
-    // UNIT
-    // ---------------------------------------------------------------
-
-    if (
-      prize.kind === 'unit'
-    ) {
-
-      const candidates =
-        UNIT_KEYS.filter(
-          k =>
-            !SAVE.seen[k]
-        );
-
-
-      if (candidates.length) {
-
-        const key =
-          Phaser.Utils.Array.GetRandom(
-            candidates
-          );
-
-
-        discoverUnit(
-          key
-        );
-
-
-        return {
-
-          kind: 'unit',
-
-          key: key,
-
-          text:
-            `ค้นพบ!\n${UNITS[key].name}\n+${GEM_DISCOVER} ◆`
-
-        };
-
-      }
-
-
-      // ถ้าค้นพบครบแล้ว
-      prize =
-        GACHA_PRIZES.find(
-          p =>
-            p.kind === 'gold' &&
-            p.gold > 100
-        ) ||
-        GACHA_PRIZES[0];
-    }
-
-
-    // ---------------------------------------------------------------
-    // GOLD
-    // ---------------------------------------------------------------
-
-    SAVE.gold +=
-      prize.gold;
-
-
-    return {
-
-      kind: 'gold',
-
-      text:
-        `+${prize.gold}\nทอง`
-
+    let r = Math.random() * GACHA_PRIZES.reduce((s, p) => s + p.w, 0);
+    let prize = GACHA_PRIZES.find(p => (r -= p.w) < 0) || GACHA_PRIZES[0];
+    const pick = ok => {
+      const list = UNIT_KEYS.filter(ok);
+      return list.length ? Phaser.Utils.Array.GetRandom(list) : null;
     };
-  }
 
-
-  // ===================================================================
-  // SHOW RESULTS
-  // ===================================================================
-
-  showResults(
-    results
-  ) {
-
-    this.res.removeAll(
-      true
-    );
-
-
-    const n =
-      results.length;
-
-
-    results.forEach(
-      (r, i) => {
-
-        let col;
-        let row;
-
-
-        if (n === 1) {
-
-          col = 0;
-          row = 0;
-
-        } else {
-
-          col =
-            i % 5;
-
-          row =
-            Math.floor(
-              i / 5
-            );
-
-        }
-
-
-        const x =
-          n === 1
-            ? W / 2
-            : 430 +
-              col * 95;
-
-
-        const y =
-          n === 1
-            ? H / 2
-            : 190 +
-              row * 125;
-
-
-        const card =
-          this.add.container(
-            x,
-            y
-          );
-
-
-        let fill =
-          0x3a2c1c;
-
-
-        let border =
-          0x8a6a3a;
-
-
-        if (
-          r.kind === 'unit'
-        ) {
-
-          fill =
-            0x702c78;
-
-          border =
-            0xffd23f;
-
-        }
-
-
-        if (
-          r.kind === 'level'
-        ) {
-
-          fill =
-            0x1d3b52;
-
-          border =
-            0x4da6ff;
-
-        }
-
-
-        card.add(
-          this.add.rectangle(
-            0,
-            0,
-            86,
-            112,
-            fill
-          )
-            .setStrokeStyle(
-              3,
-              border
-            )
-        );
-
-
-        // ภาพตัวละคร
-        if (
-          r.key &&
-          typeof unitPortrait === 'function'
-        ) {
-
-          card.add(
-            this.add.ellipse(
-              0,
-              -20,
-              50,
-              8,
-              0x000000,
-              0.3
-            )
-          );
-
-
-          const portrait =
-            unitPortrait(
-              this,
-              0,
-              -20,
-              r.key,
-              52
-            );
-
-
-          if (portrait) {
-
-            card.add(
-              portrait
-            );
-
-          }
-
-        } else {
-
-          card.add(
-            this.add.circle(
-              0,
-              -25,
-              17,
-              0xffd23f
-            )
-              .setStrokeStyle(
-                3,
-                0xb8860b
-              )
-          );
-
-
-          card.add(
-            this.add.text(
-              0,
-              -25,
-              '◆',
-              {
-                fontFamily: FONT,
-                fontSize: '17px',
-                color: '#ffffff',
-                fontStyle: 'bold'
-              }
-            )
-              .setOrigin(0.5)
-          );
-        }
-
-
-        card.add(
-          this.add.text(
-            0,
-            30,
-            r.text,
-            {
-              fontFamily: FONT,
-              fontSize: '11px',
-              color:
-                r.kind === 'unit'
-                  ? '#ffe066'
-                  : '#ffffff',
-              align: 'center',
-              fontStyle: 'bold',
-              wordWrap: {
-                width: 78
-              }
-            }
-          )
-            .setOrigin(0.5)
-        );
-
-
-        card.setScale(
-          0
-        );
-
-
-        this.res.add(
-          card
-        );
-
-
-        this.tweens.add({
-
-          targets: card,
-
-          scaleX: 1,
-          scaleY: 1,
-
-          duration: 250,
-
-          delay:
-            i * 100,
-
-          ease:
-            'Back.easeOut'
-
-        });
-
+    if (prize.kind === 'level') {
+      const key = pick(k => SAVE.seen[k] && SAVE.levels[k] < MAX_LEVEL);
+      if (key) {
+        SAVE.levels[key]++;
+        return { kind: 'level', key, text: `${UNITS[key].name}\nอัปเป็น Lv ${SAVE.levels[key]}` };
       }
-    );
-
-
-    this.refresh();
-
-
-    // ปิดผลหลังจากกด
-    const close = this.add.text(
-      W / 2,
-      H - 28,
-      'แตะเพื่อปิดผลการสุ่ม',
-      {
-        fontFamily: FONT,
-        fontSize: '14px',
-        color: '#ffffff',
-        backgroundColor: '#000000aa',
-        padding: {
-          x: 12,
-          y: 6
-        }
-      }
-    )
-      .setOrigin(0.5)
-      .setDepth(101)
-      .setInteractive({
-        useHandCursor: true
-      });
-
-
-    close.once(
-      'pointerdown',
-      () => {
-
-        this.res.removeAll(
-          true
-        );
-
-        close.destroy();
-
-      }
-    );
-  }
-
-
-  // ===================================================================
-  // TOAST
-  // ===================================================================
-
-  toast(
-    message
-  ) {
-
-    if (!this.toastText) {
-      return;
+      prize = GACHA_PRIZES[0];
     }
 
+    if (prize.kind === 'unit') {
+      const key = pick(k => !SAVE.seen[k]);
+      if (key) {
+        discoverUnit(key);
+        return { kind: 'unit', key, text: `ค้นพบ!\n${UNITS[key].name}\n+${GEM_DISCOVER} ◆` };
+      }
+      prize = GACHA_PRIZES.find(p => p.kind === 'gold' && p.gold > 100) || GACHA_PRIZES[0];   // ค้นพบครบแล้ว
+    }
 
-    this.toastText
-      .setText(message)
-      .setAlpha(1);
+    SAVE.gold += prize.gold;
+    return { kind: 'gold', text: `+${prize.gold}\nทอง` };
+  }
 
+  // แสดงผลเป็นการ์ดบนฉากมืด (แตะที่ไหนก็ได้เพื่อปิด)
+  showResults(results) {
+    const n = results.length;
+    this.res.removeAll(true);
+    this.res.add([
+      this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.6).setInteractive().once('pointerdown', () => this.res.removeAll(true)),
+      this.t(GACHA_X, H - 28, 'แตะเพื่อปิดผลการสุ่ม', 14, '#fff', { fontStyle: 'normal', backgroundColor: '#000000aa', padding: { x: 12, y: 6 } }),
+    ]);
 
-    this.tweens.killTweensOf(
-      this.toastText
-    );
+    results.forEach((r, i) => {
+      const x = n === 1 ? GACHA_X : GACHA_X + (i % 5 - 2) * 96;
+      const y = n === 1 ? 230 : 190 + Math.floor(i / 5) * 125;
+      const [fill, border] = r.kind === 'unit' ? [0x702c78, 0xffd23f] : r.kind === 'level' ? [0x1d3b52, 0x4da6ff] : [0x3a2c1c, 0x8a6a3a];
 
+      const card = this.add.container(x, y, [this.add.rectangle(0, 0, 86, 112, fill).setStrokeStyle(3, border)]);
+      if (r.key) {
+        card.add([this.add.ellipse(0, -6, 50, 8, 0x000000, 0.3), unitPortrait(this, 0, -6, r.key, 46)]);
+      } else {
+        card.add([this.add.circle(0, -25, 17, 0xffd23f).setStrokeStyle(3, 0xb8860b), this.t(0, -25, '$', 17)]);
+      }
+      card.add(this.t(0, 30, r.text, 11, r.kind === 'unit' ? '#ffe066' : '#fff', { align: 'center', wordWrap: { width: 78 } }));
 
-    this.tweens.add({
-
-      targets:
-        this.toastText,
-
-      alpha: 0,
-
-      delay: 1200,
-
-      duration: 500
-
+      card.setScale(0);
+      this.res.add(card);
+      this.tweens.add({ targets: card, scale: n === 1 ? 1.6 : 1, duration: 250, delay: i * 100, ease: 'Back.easeOut' });
     });
+    this.refresh();
+  }
+
+  toast(message) {
+    this.toastText.setText(message).setAlpha(1);
+    this.tweens.killTweensOf(this.toastText);
+    this.tweens.add({ targets: this.toastText, alpha: 0, delay: 1200, duration: 500 });
   }
 }
